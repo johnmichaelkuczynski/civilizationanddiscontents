@@ -1,0 +1,723 @@
+import { chatMessages, instructions, rewrites, quizzes, studyGuides, studentTests, cognitiveMaps, summaryWithThesis, thesisDeepDive, suggestedReadings, users, sessions, purchases, testResults, type ChatMessage, type InsertChatMessage, type Instruction, type InsertInstruction, type Rewrite, type InsertRewrite, type Quiz, type InsertQuiz, type StudyGuide, type InsertStudyGuide, type StudentTest, type InsertStudentTest, type CognitiveMap, type InsertCognitiveMap, type SummaryWithThesis, type InsertSummaryWithThesis, type ThesisDeepDive, type InsertThesisDeepDive, type SuggestedReadings, type InsertSuggestedReadings, type User, type InsertUser, type Session, type InsertSession, type Purchase, type InsertPurchase, type TestResult, type InsertTestResult } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
+
+export interface IStorage {
+  createChatMessage(message: InsertChatMessage, sessionKey?: string): Promise<ChatMessage>;
+  getChatMessages(sessionKey?: string): Promise<ChatMessage[]>;
+  clearChatMessages(sessionKey?: string): Promise<void>;
+  createInstruction(instruction: InsertInstruction): Promise<Instruction>;
+  getInstructions(): Promise<Instruction[]>;
+  createRewrite(rewrite: InsertRewrite): Promise<Rewrite>;
+  getRewrites(): Promise<Rewrite[]>;
+  getRewriteById(id: number): Promise<Rewrite | null>;
+  createQuiz(quiz: InsertQuiz): Promise<Quiz>;
+  getQuizzes(): Promise<Quiz[]>;
+  getQuizById(id: number): Promise<Quiz | null>;
+  createStudyGuide(studyGuide: InsertStudyGuide): Promise<StudyGuide>;
+  getStudyGuides(): Promise<StudyGuide[]>;
+  getStudyGuideById(id: number): Promise<StudyGuide | null>;
+  createStudentTest(studentTest: InsertStudentTest): Promise<StudentTest>;
+  getStudentTests(): Promise<StudentTest[]>;
+  getStudentTestById(id: number): Promise<StudentTest | null>;
+  createCognitiveMap(cognitiveMap: InsertCognitiveMap): Promise<CognitiveMap>;
+  getCognitiveMaps(): Promise<CognitiveMap[]>;
+  getCognitiveMapById(id: number): Promise<CognitiveMap | null>;
+  
+  // Summary with Thesis functions
+  createSummaryWithThesis(summaryWithThesis: InsertSummaryWithThesis): Promise<SummaryWithThesis>;
+  getSummariesWithThesis(): Promise<SummaryWithThesis[]>;
+  getSummaryWithThesisById(id: number): Promise<SummaryWithThesis | null>;
+  
+  // Thesis Deep-Dive functions
+  createThesisDeepDive(thesisDeepDive: InsertThesisDeepDive): Promise<ThesisDeepDive>;
+  getThesisDeepDives(): Promise<ThesisDeepDive[]>;
+  getThesisDeepDiveById(id: number): Promise<ThesisDeepDive | null>;
+
+  // Suggested Readings functions
+  createSuggestedReadings(suggestedReadings: InsertSuggestedReadings): Promise<SuggestedReadings>;
+  getSuggestedReadings(): Promise<SuggestedReadings[]>;
+  getSuggestedReadingsById(id: number): Promise<SuggestedReadings | null>;
+
+  
+  // User management
+  createUser(user: InsertUser): Promise<User>;
+  getUserById(id: number): Promise<User | null>;
+  getUserByUsername(username: string): Promise<User | null>;
+  updateUserCredits(userId: number, credits: number): Promise<User | null>;
+  updateUserLastLogin(userId: number): Promise<void>;
+  deleteUser(userId: number): Promise<void>;
+  resetUserPassword(username: string, passwordHash: string): Promise<User | null>;
+  
+  // Session management
+  createSession(session: InsertSession): Promise<Session>;
+  getSession(sessionId: string): Promise<Session | null>;
+  deleteSession(sessionId: string): Promise<void>;
+  
+  // Purchase management
+  createPurchase(purchase: InsertPurchase): Promise<Purchase>;
+  getPurchasesByUserId(userId: number): Promise<Purchase[]>;
+  updatePurchaseStatus(purchaseId: number, status: string): Promise<void>;
+  
+  // Test results management
+  createTestResult(testResult: InsertTestResult): Promise<TestResult>;
+  getTestResultsByUserId(userId: number): Promise<TestResult[]>;
+  getTestResultsByStudentTestId(studentTestId: number): Promise<TestResult[]>;
+
+}
+
+export class MemStorage implements IStorage {
+  private chatMessages: Map<number, ChatMessage>;
+  private chatMessagesBySession: Map<string, Set<number>>; // sessionKey -> Set of message IDs
+  private instructions: Map<number, Instruction>;
+  private rewrites: Map<number, Rewrite>;
+  private quizzes: Map<number, Quiz>;
+  private studyGuides: Map<number, StudyGuide>;
+  private studentTests: Map<number, StudentTest>;
+  private cognitiveMaps: Map<number, CognitiveMap>;
+  private suggestedReadings: Map<number, SuggestedReadings>;
+
+  private testResults: Map<number, TestResult>;
+  private users: Map<number, User>;
+  private usersByUsername: Map<string, User>;
+  private sessions: Map<string, Session>;
+  private purchases: Map<number, Purchase>;
+  private currentChatId: number;
+  private currentInstructionId: number;
+  private currentRewriteId: number;
+  private currentQuizId: number;
+  private currentStudyGuideId: number;
+  private currentStudentTestId: number;
+  private currentCognitiveMapId: number;
+  private currentSuggestedReadingsId: number;
+
+  private currentTestResultId: number;
+  private currentUserId: number;
+  private currentPurchaseId: number;
+
+  constructor() {
+    this.chatMessages = new Map();
+    this.chatMessagesBySession = new Map();
+    this.instructions = new Map();
+    this.rewrites = new Map();
+    this.quizzes = new Map();
+    this.studyGuides = new Map();
+    this.studentTests = new Map();
+    this.cognitiveMaps = new Map();
+    this.suggestedReadings = new Map();
+
+    this.testResults = new Map();
+    this.users = new Map();
+    this.usersByUsername = new Map();
+    this.sessions = new Map();
+    this.purchases = new Map();
+    this.currentChatId = 1;
+    this.currentInstructionId = 1;
+    this.currentRewriteId = 1;
+    this.currentQuizId = 1;
+    this.currentStudyGuideId = 1;
+    this.currentStudentTestId = 1;
+    this.currentCognitiveMapId = 1;
+    this.currentSuggestedReadingsId = 1;
+
+    this.currentTestResultId = 1;
+    this.currentUserId = 1;
+    this.currentPurchaseId = 1;
+  }
+
+  async createChatMessage(insertMessage: InsertChatMessage, sessionKey: string = 'default'): Promise<ChatMessage> {
+    const id = this.currentChatId++;
+    const message: ChatMessage = {
+      ...insertMessage,
+      id,
+      timestamp: new Date(),
+    };
+    this.chatMessages.set(id, message);
+    
+    // Track message by session
+    if (!this.chatMessagesBySession.has(sessionKey)) {
+      this.chatMessagesBySession.set(sessionKey, new Set());
+    }
+    this.chatMessagesBySession.get(sessionKey)!.add(id);
+    
+    return message;
+  }
+
+  async getChatMessages(sessionKey: string = 'default'): Promise<ChatMessage[]> {
+    const sessionMessageIds = this.chatMessagesBySession.get(sessionKey) || new Set();
+    return Array.from(sessionMessageIds)
+      .map(id => this.chatMessages.get(id))
+      .filter((msg): msg is ChatMessage => msg !== undefined)
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  async clearChatMessages(sessionKey: string = 'default'): Promise<void> {
+    const sessionMessageIds = this.chatMessagesBySession.get(sessionKey) || new Set();
+    // Remove messages from main storage
+    sessionMessageIds.forEach(id => this.chatMessages.delete(id));
+    // Clear session tracking
+    this.chatMessagesBySession.delete(sessionKey);
+  }
+
+  async createInstruction(insertInstruction: InsertInstruction): Promise<Instruction> {
+    const id = this.currentInstructionId++;
+    const instruction: Instruction = {
+      ...insertInstruction,
+      id,
+      timestamp: new Date(),
+    };
+    this.instructions.set(id, instruction);
+    return instruction;
+  }
+
+  async getInstructions(): Promise<Instruction[]> {
+    return Array.from(this.instructions.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async createRewrite(insertRewrite: InsertRewrite): Promise<Rewrite> {
+    const id = this.currentRewriteId++;
+    const rewrite: Rewrite = {
+      ...insertRewrite,
+      id,
+      timestamp: new Date(),
+    };
+    this.rewrites.set(id, rewrite);
+    return rewrite;
+  }
+
+  async getRewrites(): Promise<Rewrite[]> {
+    return Array.from(this.rewrites.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async getRewriteById(id: number): Promise<Rewrite | null> {
+    return this.rewrites.get(id) || null;
+  }
+
+  async createQuiz(insertQuiz: InsertQuiz): Promise<Quiz> {
+    const id = this.currentQuizId++;
+    const quiz: Quiz = {
+      ...insertQuiz,
+      id,
+      timestamp: new Date(),
+    };
+    this.quizzes.set(id, quiz);
+    return quiz;
+  }
+
+  async getQuizzes(): Promise<Quiz[]> {
+    return Array.from(this.quizzes.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async getQuizById(id: number): Promise<Quiz | null> {
+    return this.quizzes.get(id) || null;
+  }
+
+  async createStudyGuide(insertStudyGuide: InsertStudyGuide): Promise<StudyGuide> {
+    const id = this.currentStudyGuideId++;
+    const studyGuide: StudyGuide = {
+      ...insertStudyGuide,
+      id,
+      timestamp: new Date(),
+    };
+    this.studyGuides.set(id, studyGuide);
+    return studyGuide;
+  }
+
+  async getStudyGuides(): Promise<StudyGuide[]> {
+    return Array.from(this.studyGuides.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async getStudyGuideById(id: number): Promise<StudyGuide | null> {
+    return this.studyGuides.get(id) || null;
+  }
+
+  async createStudentTest(insertStudentTest: InsertStudentTest): Promise<StudentTest> {
+    const id = this.currentStudentTestId++;
+    const studentTest: StudentTest = {
+      ...insertStudentTest,
+      id,
+      timestamp: new Date(),
+    };
+    this.studentTests.set(id, studentTest);
+    return studentTest;
+  }
+
+  async getStudentTests(): Promise<StudentTest[]> {
+    return Array.from(this.studentTests.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async getStudentTestById(id: number): Promise<StudentTest | null> {
+    return this.studentTests.get(id) || null;
+  }
+
+  async createCognitiveMap(insertCognitiveMap: InsertCognitiveMap): Promise<CognitiveMap> {
+    const id = this.currentCognitiveMapId++;
+    const cognitiveMap: CognitiveMap = {
+      ...insertCognitiveMap,
+      id,
+      timestamp: new Date(),
+    };
+    this.cognitiveMaps.set(id, cognitiveMap);
+    return cognitiveMap;
+  }
+
+  async getCognitiveMaps(): Promise<CognitiveMap[]> {
+    return Array.from(this.cognitiveMaps.values())
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }
+
+  async getCognitiveMapById(id: number): Promise<CognitiveMap | null> {
+    return this.cognitiveMaps.get(id) || null;
+  }
+
+  // User management methods
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const id = this.currentUserId++;
+    // Give admin unlimited credits
+    const credits = insertUser.username === 'jmkuczynski' ? 999999999 : insertUser.credits;
+    const user: User = {
+      ...insertUser,
+      id,
+      credits,
+      createdAt: new Date(),
+      lastLogin: null,
+    };
+    this.users.set(id, user);
+    this.usersByUsername.set(user.username, user);
+    return user;
+  }
+
+  async getUserById(id: number): Promise<User | null> {
+    return this.users.get(id) || null;
+  }
+
+  async getUserByUsername(username: string): Promise<User | null> {
+    return this.usersByUsername.get(username) || null;
+  }
+
+  async updateUserCredits(userId: number, credits: number): Promise<User | null> {
+    const user = this.users.get(userId);
+    if (user) {
+      const updatedUser = { ...user, credits };
+      this.users.set(userId, updatedUser);
+      this.usersByUsername.set(user.username, updatedUser);
+      return updatedUser;
+    }
+    return null;
+  }
+
+  async updateUserLastLogin(userId: number): Promise<void> {
+    const user = this.users.get(userId);
+    if (user) {
+      const updatedUser = { ...user, lastLogin: new Date() };
+      this.users.set(userId, updatedUser);
+      this.usersByUsername.set(user.username, updatedUser);
+    }
+  }
+
+  async deleteUser(userId: number): Promise<void> {
+    const user = this.users.get(userId);
+    if (user) {
+      this.users.delete(userId);
+      this.usersByUsername.delete(user.username);
+    }
+  }
+
+  async resetUserPassword(username: string, passwordHash: string): Promise<User | null> {
+    const user = this.usersByUsername.get(username);
+    if (user) {
+      const updatedUser = { ...user, passwordHash, credits: 999999999 };
+      this.users.set(user.id, updatedUser);
+      this.usersByUsername.set(username, updatedUser);
+      return updatedUser;
+    }
+    return null;
+  }
+
+  // Session management methods
+  async createSession(insertSession: InsertSession): Promise<Session> {
+    const session: Session = {
+      ...insertSession,
+      createdAt: new Date(),
+    };
+    this.sessions.set(session.id, session);
+    return session;
+  }
+
+  async getSession(sessionId: string): Promise<Session | null> {
+    const session = this.sessions.get(sessionId);
+    if (session && session.expiresAt > new Date()) {
+      return session;
+    }
+    if (session) {
+      this.sessions.delete(sessionId);
+    }
+    return null;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    this.sessions.delete(sessionId);
+  }
+
+  // Purchase management methods
+  async createPurchase(insertPurchase: InsertPurchase): Promise<Purchase> {
+    const id = this.currentPurchaseId++;
+    const purchase: Purchase = {
+      ...insertPurchase,
+      id,
+      createdAt: new Date(),
+    };
+    this.purchases.set(id, purchase);
+    return purchase;
+  }
+
+  async getPurchasesByUserId(userId: number): Promise<Purchase[]> {
+    return Array.from(this.purchases.values())
+      .filter(purchase => purchase.userId === userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async updatePurchaseStatus(purchaseId: number, status: string): Promise<void> {
+    const purchase = this.purchases.get(purchaseId);
+    if (purchase) {
+      const updatedPurchase = { ...purchase, status };
+      this.purchases.set(purchaseId, updatedPurchase);
+    }
+  }
+
+
+
+  // Test result methods
+  async createTestResult(insertTestResult: InsertTestResult): Promise<TestResult> {
+    const id = this.currentTestResultId++;
+    const testResult: TestResult = {
+      ...insertTestResult,
+      id,
+      completedAt: new Date(),
+    };
+    this.testResults.set(id, testResult);
+    return testResult;
+  }
+
+  async getTestResultsByUserId(userId: number): Promise<TestResult[]> {
+    return Array.from(this.testResults.values())
+      .filter(result => result.userId === userId)
+      .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
+  }
+
+  async getTestResultsByStudentTestId(studentTestId: number): Promise<TestResult[]> {
+    return Array.from(this.testResults.values())
+      .filter(result => result.studentTestId === studentTestId)
+      .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());
+  }
+
+  // Suggested Readings methods
+  async createSuggestedReadings(insertSuggestedReadings: InsertSuggestedReadings): Promise<SuggestedReadings> {
+    const id = this.currentSuggestedReadingsId++;
+    const suggestedReadings: SuggestedReadings = {
+      ...insertSuggestedReadings,
+      id,
+      timestamp: new Date(),
+    };
+    this.suggestedReadings.set(id, suggestedReadings);
+    return suggestedReadings;
+  }
+
+  async getSuggestedReadings(): Promise<SuggestedReadings[]> {
+    // Return empty for now - this is memory storage only
+    return [];
+  }
+
+  async getSuggestedReadingsById(id: number): Promise<SuggestedReadings | null> {
+    return null;
+  }
+}
+
+// Database Storage Implementation
+export class DatabaseStorage implements IStorage {
+  async createChatMessage(insertMessage: InsertChatMessage, sessionKey: string = 'default'): Promise<ChatMessage> {
+    const [message] = await db.insert(chatMessages).values({
+      ...insertMessage,
+      sessionKey,
+      context: insertMessage.context || null
+    }).returning();
+    return message;
+  }
+
+  async getChatMessages(sessionKey: string = 'default'): Promise<ChatMessage[]> {
+    return await db.select().from(chatMessages)
+      .where(eq(chatMessages.sessionKey, sessionKey))
+      .orderBy(desc(chatMessages.timestamp));
+  }
+
+  async clearChatMessages(sessionKey: string = 'default'): Promise<void> {
+    await db.delete(chatMessages).where(eq(chatMessages.sessionKey, sessionKey));
+  }
+
+  async createInstruction(insertInstruction: InsertInstruction): Promise<Instruction> {
+    const [instruction] = await db.insert(instructions).values(insertInstruction).returning();
+    return instruction;
+  }
+
+  async getInstructions(): Promise<Instruction[]> {
+    return await db.select().from(instructions).orderBy(desc(instructions.timestamp));
+  }
+
+  async createRewrite(insertRewrite: InsertRewrite): Promise<Rewrite> {
+    const [rewrite] = await db.insert(rewrites).values({
+      ...insertRewrite,
+      chunkIndex: insertRewrite.chunkIndex ?? null,
+      parentRewriteId: insertRewrite.parentRewriteId ?? null
+    }).returning();
+    return rewrite;
+  }
+
+  async getRewrites(): Promise<Rewrite[]> {
+    return await db.select().from(rewrites).orderBy(desc(rewrites.timestamp));
+  }
+
+  async getRewriteById(id: number): Promise<Rewrite | null> {
+    const [rewrite] = await db.select().from(rewrites).where(eq(rewrites.id, id));
+    return rewrite || null;
+  }
+
+  async createQuiz(insertQuiz: InsertQuiz): Promise<Quiz> {
+    const [quiz] = await db.insert(quizzes).values({
+      ...insertQuiz,
+      chunkIndex: insertQuiz.chunkIndex ?? null
+    }).returning();
+    return quiz;
+  }
+
+  async getQuizzes(): Promise<Quiz[]> {
+    return await db.select().from(quizzes).orderBy(desc(quizzes.timestamp));
+  }
+
+  async getQuizById(id: number): Promise<Quiz | null> {
+    const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, id));
+    return quiz || null;
+  }
+
+  async createStudyGuide(insertStudyGuide: InsertStudyGuide): Promise<StudyGuide> {
+    const [studyGuide] = await db.insert(studyGuides).values({
+      ...insertStudyGuide,
+      chunkIndex: insertStudyGuide.chunkIndex ?? null
+    }).returning();
+    return studyGuide;
+  }
+
+  async getStudyGuides(): Promise<StudyGuide[]> {
+    return await db.select().from(studyGuides).orderBy(desc(studyGuides.timestamp));
+  }
+
+  async getStudyGuideById(id: number): Promise<StudyGuide | null> {
+    const [studyGuide] = await db.select().from(studyGuides).where(eq(studyGuides.id, id));
+    return studyGuide || null;
+  }
+
+  async createStudentTest(insertStudentTest: InsertStudentTest): Promise<StudentTest> {
+    const [studentTest] = await db.insert(studentTests).values({
+      ...insertStudentTest,
+      chunkIndex: insertStudentTest.chunkIndex ?? null
+    }).returning();
+    return studentTest;
+  }
+
+  async getStudentTests(): Promise<StudentTest[]> {
+    return await db.select().from(studentTests).orderBy(desc(studentTests.timestamp));
+  }
+
+  async getStudentTestById(id: number): Promise<StudentTest | null> {
+    const [studentTest] = await db.select().from(studentTests).where(eq(studentTests.id, id));
+    return studentTest || null;
+  }
+
+  async createCognitiveMap(insertCognitiveMap: InsertCognitiveMap): Promise<CognitiveMap> {
+    const [cognitiveMap] = await db.insert(cognitiveMaps).values({
+      ...insertCognitiveMap,
+      chunkIndex: insertCognitiveMap.chunkIndex ?? null
+    }).returning();
+    return cognitiveMap;
+  }
+
+  async getCognitiveMaps(): Promise<CognitiveMap[]> {
+    return await db.select().from(cognitiveMaps).orderBy(desc(cognitiveMaps.timestamp));
+  }
+
+  async getCognitiveMapById(id: number): Promise<CognitiveMap | null> {
+    const [cognitiveMap] = await db.select().from(cognitiveMaps).where(eq(cognitiveMaps.id, id));
+    return cognitiveMap || null;
+  }
+
+  // Summary with Thesis functions
+  async createSummaryWithThesis(insertSummaryWithThesis: InsertSummaryWithThesis): Promise<SummaryWithThesis> {
+    const [summaryThesis] = await db.insert(summaryWithThesis).values({
+      ...insertSummaryWithThesis,
+      chunkIndex: insertSummaryWithThesis.chunkIndex ?? null
+    }).returning();
+    return summaryThesis;
+  }
+
+  async getSummariesWithThesis(): Promise<SummaryWithThesis[]> {
+    return await db.select().from(summaryWithThesis).orderBy(desc(summaryWithThesis.timestamp));
+  }
+
+  async getSummaryWithThesisById(id: number): Promise<SummaryWithThesis | null> {
+    const [summaryThesis] = await db.select().from(summaryWithThesis).where(eq(summaryWithThesis.id, id));
+    return summaryThesis || null;
+  }
+
+  // Thesis Deep-Dive functions
+  async createThesisDeepDive(insertThesisDeepDive: InsertThesisDeepDive): Promise<ThesisDeepDive> {
+    const [deepDive] = await db.insert(thesisDeepDive).values({
+      ...insertThesisDeepDive,
+      chunkIndex: insertThesisDeepDive.chunkIndex ?? null,
+      comparisonTarget: insertThesisDeepDive.comparisonTarget ?? null
+    }).returning();
+    return deepDive;
+  }
+
+  async getThesisDeepDives(): Promise<ThesisDeepDive[]> {
+    return await db.select().from(thesisDeepDive).orderBy(desc(thesisDeepDive.timestamp));
+  }
+
+  async getThesisDeepDiveById(id: number): Promise<ThesisDeepDive | null> {
+    const [deepDive] = await db.select().from(thesisDeepDive).where(eq(thesisDeepDive.id, id));
+    return deepDive || null;
+  }
+
+  // User management methods with admin support
+  async createUser(insertUser: InsertUser): Promise<User> {
+    // Give admin unlimited credits
+    const credits = insertUser.username === 'jmkuczynski' ? 999999999 : (insertUser.credits || 0);
+    const [user] = await db.insert(users).values({
+      ...insertUser,
+      credits
+    }).returning();
+    return user;
+  }
+
+  async getUserById(id: number): Promise<User | null> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || null;
+  }
+
+  async getUserByUsername(username: string): Promise<User | null> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || null;
+  }
+
+  async updateUserCredits(userId: number, credits: number): Promise<User | null> {
+    const [user] = await db.update(users)
+      .set({ credits })
+      .where(eq(users.id, userId))
+      .returning();
+    return user || null;
+  }
+
+  async updateUserLastLogin(userId: number): Promise<void> {
+    await db.update(users)
+      .set({ lastLogin: new Date() })
+      .where(eq(users.id, userId));
+  }
+
+  async deleteUser(userId: number): Promise<void> {
+    await db.delete(users).where(eq(users.id, userId));
+  }
+
+  async resetUserPassword(username: string, passwordHash: string): Promise<User | null> {
+    const [user] = await db.update(users)
+      .set({ passwordHash, credits: 999999999 })
+      .where(eq(users.username, username))
+      .returning();
+    return user || null;
+  }
+
+  // Session management methods
+  async createSession(insertSession: InsertSession): Promise<Session> {
+    const [session] = await db.insert(sessions).values(insertSession).returning();
+    return session;
+  }
+
+  async getSession(sessionId: string): Promise<Session | null> {
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    if (session && session.expiresAt > new Date()) {
+      return session;
+    }
+    if (session) {
+      await this.deleteSession(sessionId);
+    }
+    return null;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  }
+
+  // Purchase management methods
+  async createPurchase(insertPurchase: InsertPurchase): Promise<Purchase> {
+    const [purchase] = await db.insert(purchases).values({
+      ...insertPurchase,
+      status: insertPurchase.status || "pending",
+      paypalOrderId: insertPurchase.paypalOrderId ?? null
+    }).returning();
+    return purchase;
+  }
+
+  async getPurchasesByUserId(userId: number): Promise<Purchase[]> {
+    return await db.select().from(purchases)
+      .where(eq(purchases.userId, userId))
+      .orderBy(desc(purchases.createdAt));
+  }
+
+  async updatePurchaseStatus(purchaseId: number, status: string): Promise<void> {
+    await db.update(purchases)
+      .set({ status })
+      .where(eq(purchases.id, purchaseId));
+  }
+
+  // Test results management methods
+  async createTestResult(insertTestResult: InsertTestResult): Promise<TestResult> {
+    const [testResult] = await db.insert(testResults).values(insertTestResult).returning();
+    return testResult;
+  }
+
+  async getTestResultsByUserId(userId: number): Promise<TestResult[]> {
+    return await db.select().from(testResults)
+      .where(eq(testResults.userId, userId))
+      .orderBy(desc(testResults.completedAt));
+  }
+
+  async getTestResultsByStudentTestId(studentTestId: number): Promise<TestResult[]> {
+    return await db.select().from(testResults)
+      .where(eq(testResults.studentTestId, studentTestId))
+      .orderBy(desc(testResults.completedAt));
+  }
+
+  // Suggested Readings methods
+  async createSuggestedReadings(insertSuggestedReadings: InsertSuggestedReadings): Promise<SuggestedReadings> {
+    const [readings] = await db.insert(suggestedReadings).values({
+      ...insertSuggestedReadings,
+      chunkIndex: insertSuggestedReadings.chunkIndex ?? null
+    }).returning();
+    return readings;
+  }
+
+  async getSuggestedReadings(): Promise<SuggestedReadings[]> {
+    return await db.select().from(suggestedReadings).orderBy(desc(suggestedReadings.timestamp));
+  }
+
+  async getSuggestedReadingsById(id: number): Promise<SuggestedReadings | null> {
+    const [readings] = await db.select().from(suggestedReadings).where(eq(suggestedReadings.id, id));
+    return readings || null;
+  }
+
+
+}
+
+export const storage = new DatabaseStorage();
