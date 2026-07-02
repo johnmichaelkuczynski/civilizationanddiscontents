@@ -9,7 +9,7 @@ packages = ["freetype", "gumbo", "harfbuzz", "jbig2dec", "libjpeg_turbo", "mupdf
 [deployment]
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["npm", "run", "start"]
+run = ["node", "./dist/index.cjs"]
 
 [[ports]]
 localPort = 5000
@@ -37,4 +37,6 @@ args = "npm run dev"
 waitForPort = 5000
 
 [agent]
-integrations = ["perplexity_v0==1.0.0", "javascript_anthropic==1.0.0", "javascript_openai==1.0.0"]
+integrations = ["perplexity_v0:1.0.0", "javascript_anthropic:1.0.0", "javascript_openai:1.0.0"]
+stack = "FULLSTACK_JS"
+expertMode = true
